@@ -1,0 +1,209 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:aop="http://www.springframework.org/schema/aop"
+	xmlns:tx="http://www.springframework.org/schema/tx" xmlns:context="http://www.springframework.org/schema/context"
+	xmlns:p="http://www.springframework.org/schema/p" xmlns:jpa="http://www.springframework.org/schema/data/jpa"
+	xsi:schemaLocation="
+                    http://www.springframework.org/schema/beans
+                    http://www.springframework.org/schema/beans/spring-beans.xsd
+                    http://www.springframework.org/schema/tx 
+                    http://www.springframework.org/schema/tx/spring-tx.xsd
+                    http://www.springframework.org/schema/aop 
+                    http://www.springframework.org/schema/aop/spring-aop.xsd
+                    http://www.springframework.org/schema/context      
+                    http://www.springframework.org/schema/context/spring-context.xsd
+        			http://www.springframework.org/schema/data/jpa 
+        			http://www.springframework.org/schema/data/jpa/spring-jpa.xsd">
+	<!-- 1.Druid内置提供一个StatFilter，用于统计监控信息 -->
+	<bean id="stat-filter" class="com.alibaba.druid.filter.stat.StatFilter">
+		<property name="mergeSql" value="true" />
+		<!-- StatFilter属性slowSqlMillis用来配置SQL慢的标准，执行时间超过slowSqlMillis的就是慢。slowSqlMillis的缺省值为3000，也就是3秒。配置中，slowSqlMillis被修改为10秒，并且通过日志输出执行慢的SQL -->
+		<property name="slowSqlMillis" value="10000" />
+		<property name="logSlowSql" value="true" />
+	</bean>
+	<!-- 2.Druid提供了Spring和Jdbc的关联监控。com.alibaba.druid.support.spring.stat.DruidStatInterceptor是一个标准的Spring 
+		MethodInterceptor。可以灵活进行AOP配置 -->
+	<bean id="druid-stat-interceptor"
+		class="com.alibaba.druid.support.spring.stat.DruidStatInterceptor">
+	</bean>
+	<bean id="druid-stat-pointcut" class="org.springframework.aop.support.JdkRegexpMethodPointcut"
+		scope="prototype">
+		<property name="patterns">
+			<list>
+				<value>com.*.service.*</value>
+				<value>com.*.dao.*</value>
+			</list>
+		</property>
+	</bean>
+	<aop:config proxy-target-class="true">
+		<aop:advisor advice-ref="druid-stat-interceptor"
+			pointcut-ref="druid-stat-pointcut" />
+	</aop:config>
+	<!-- 3.防御SQL注入攻击 有时候，一些应用框架做了自己的JDBC Proxy Driver，是的DruidDataSource无法正确识别数据库的类型，则需要特别指定 
+		详情参阅：https://github.com/alibaba/druid/wiki/%E9%85%8D%E7%BD%AE-wallfilter -->
+	<bean id="wall-filter-config" class="com.alibaba.druid.wall.WallConfig"
+		init-method="init">
+		<!-- 指定配置装载的目录 -->
+		<property name="dir" value="META-INF/druid/wall/mysql" />
+	</bean>
+	<bean id="wall-filter" class="com.alibaba.druid.wall.WallFilter">
+		<property name="dbType" value="mysql" />
+		<property name="config" ref="wall-filter-config" />
+	</bean>
+	<!-- 4.Druid内置 缺省输出的日志信息 -->
+	<bean id="log-filter" class="com.alibaba.druid.filter.logging.Log4jFilter">
+	</bean>
+	<!-- 数据源开始 -->
+	<bean id="dataSource" class="com.alibaba.druid.pool.DruidDataSource"
+		init-method="init" destroy-method="close">
+		<!-- 配置这个属性的意义在于，如果存在多个数据源，监控的时候可以通过名字来区分开来。 如果没有配置，将会生成一个名字，格式是："DataSource-" 
+			+ System.identityHashCode(this). 另外配置此属性至少在1.0.5版本中是不起作用的，强行设置name会出错 -->
+		<property name="name" value="${dataSource.name}" />
+		<!-- 基本属性 url、user、password -->
+		<property name="url" value="${dataSource.url}" />
+		<property name="username" value="${dataSource.username}" />
+		<property name="password" value="${dataSource.password}" />
+		<!-- 数据源驱动类可不写，Druid默认会自动根据URL识别DriverClass <property name="driverClassName" 
+			value="${dataSource.driverClassName}" /> -->
+
+		<!-- 配置初始化大小、最小、最大 -->
+		<property name="initialSize" value="${dataSource.initialSize}" />
+		<property name="minIdle" value="${dataSource.minIdle}" />
+		<property name="maxActive" value="${dataSource.maxActive}" />
+
+		<!-- 配置获取连接等待超时的时间 -->
+		<property name="maxWait" value="${dataSource.maxWait}" />
+
+		<!-- 配置间隔多久才进行一次检测，检测需要关闭的空闲连接，单位是毫秒 -->
+		<property name="timeBetweenEvictionRunsMillis" value="${dataSource.timeBetweenEvictionRunsMillis}" />
+
+		<!-- 配置一个连接在池中最小生存的时间，单位是毫秒 -->
+		<property name="minEvictableIdleTimeMillis" value="${dataSource.minEvictableIdleTimeMillis}" />
+
+		<property name="validationQuery" value="${dataSource.validationQuery}" />
+		<property name="testWhileIdle" value="${dataSource.testWhileIdle}" />
+		<property name="testOnBorrow" value="${dataSource.testOnBorrow}" />
+		<property name="testOnReturn" value="${dataSource.testOnReturn}" />
+
+		<!-- 打开PSCache，并且指定每个连接上PSCache的大小 如果用Oracle，则把poolPreparedStatements配置为true，mysql可以配置为false。分库分表较多的数据库，建议配置为false。 -->
+		<property name="poolPreparedStatements" value="${dataSource.poolPreparedStatements}" />
+		<property name="maxPoolPreparedStatementPerConnectionSize"
+			value="${dataSource.maxPoolPreparedStatementPerConnectionSize}" />
+
+		<!-- 缺省多个DruidDataSource的监控数据是各自独立的，在Druid-0.2.17版本之后，支持配置公用监控数据，配置参数为useGloalDataSourceStat -->
+		<property name="useGlobalDataSourceStat" value="true" />
+		<property name="filters" value="log4j" />
+		<property name="proxyFilters">
+			<list>
+				<ref bean="stat-filter" />
+				<ref bean="wall-filter" />
+				<ref bean="log-filter" />
+			</list>
+		</property>
+	</bean>
+	<!-- jpa定义 -->
+	<!-- 用于指定持久化实现JPA -->
+	<bean id="persistenceProvider" class="org.hibernate.ejb.HibernatePersistence" />
+	<!-- 指定实现JPA的适配器 -->
+	<bean id="jpaVendorAdapter"
+		class="org.springframework.orm.jpa.vendor.HibernateJpaVendorAdapter">
+		<property name="database" value="MYSQL" />
+	</bean>
+	<!-- 用于指定一些高级特性 -->
+	<bean id="jpaDialect" class="org.springframework.orm.jpa.vendor.HibernateJpaDialect" />
+
+	<!-- JPA实体管理器工厂 -->
+	<bean id="entityManagerFactory"
+		class="org.springframework.orm.jpa.LocalContainerEntityManagerFactoryBean">
+		<property name="dataSource" ref="dataSource" />
+		<property name="persistenceProvider" ref="persistenceProvider" />
+		<property name="jpaVendorAdapter" ref="jpaVendorAdapter" />
+		<property name="jpaDialect" ref="jpaDialect" />
+		<!-- 加载jpa所有的实体类 -->
+		<property name="packagesToScan" value="com.entity" />
+
+		<property name="jpaProperties">
+			<props>
+				<prop key="hibernate.dialect">${jpa.dialect}</prop>
+				<prop key="hibernate.connection.driver.class">${jpa.connection.driver.class}</prop>
+				<prop key="hibernate.max.fetch.depth">${jpa.max.fetch.depth}</prop>
+				<prop key="hibernate.jdbc.fetch.size">${jpa.jdbc.fetch.size}</prop>
+				<prop key="hibernate.jdbc.batch.size">${jpa.jdbc.batch.size}</prop>
+				<!-- <prop key="hibernate.hbm2ddl.auto">${jpa.hbm2ddl.auto}</prop> -->
+				<prop key="hibernate.show.sql">${jpa.show.sql}</prop>
+				<prop key="hibernate.format.sql">${jpa.format.sql}</prop>
+				<prop key="javax.persistence.validation.mode">${javax.persistence.validation.mode}</prop>
+			</props>
+		</property>
+	</bean>
+
+	<!-- 事务管理器 -->
+	<bean id="txManager" class="org.springframework.orm.jpa.JpaTransactionManager">
+		<property name="entityManagerFactory" ref="entityManagerFactory" />
+	</bean>
+	<!-- 重要配置：启用扫描并自动创建代理的功能 -->
+	<jpa:repositories base-package="com"
+		transaction-manager-ref="txManager" entity-manager-factory-ref="entityManagerFactory" />
+	<!-- 注解式事务 -->
+	<tx:annotation-driven transaction-manager="txManager" />
+	<!-- JSR303 Validator定义 -->
+	<bean id="validator"
+		class="org.springframework.validation.beanvalidation.LocalValidatorFactoryBean" />
+
+
+	<!-- 配置mybatis -->
+	<bean id="sqlSessionFactory" class="org.mybatis.spring.SqlSessionFactoryBean">
+		<property name="dataSource" ref="dataSource" />
+		<!-- <property name="configLocation" value="classpath:config/mybatis-config.xml"></property> -->
+		<!-- <property name="typeAliasesPackage" value="com.cbcs.entity"></property> -->
+		<property name="mapperLocations" value="classpath*:com/**/mapper/xml/*.xml"></property>
+		<property name="plugins">
+			<array>
+				<bean class="com.github.pagehelper.PageHelper">
+					<property name="properties">
+			          <value>
+			             <!-- 4.0.0以后版本可以不设置该参数 -->
+			            dialect=mysql
+			            <!-- 3.3.0版本可用 - 分页参数合理化，默认false禁用 -->
+				        <!-- 启用合理化时，如果pageNum<1会查询第一页，如果pageNum>pages会查询最后一页 -->
+				        <!-- 禁用合理化时，如果pageNum<1或pageNum>pages会返回空数据 -->
+			            reasonable=true
+			            <!-- 设置为true时，如果pageSize=0或者RowBounds.limit = 0就会查询出全部的结果 -->
+       					 <!-- （相当于没有执行分页查询，但是返回结果仍然是Page类型）-->
+			            pageSizeZero=true
+			            <!-- 该参数默认为false -->
+				        <!-- 设置为true时，会将RowBounds第一个参数offset当成pageNum页码使用 -->
+				        <!-- 和startPage中的pageNum效果一样-->
+				        offsetAsPageNum=true
+				         <!-- 该参数默认为false -->
+				        <!-- 设置为true时，使用RowBounds分页会进行count查询 -->
+				        rowBoundsWithCount=true
+				        <!-- 3.5.0版本可用 - 为了支持startPage(Object params)方法 -->
+				        <!-- 增加了一个`params`参数来配置参数映射，用于从Map或ServletRequest中取值 -->
+				        <!-- 可以配置pageNum,pageSize,count,pageSizeZero,reasonable,orderBy,不配置映射的用默认值 -->
+				        <!-- 不理解该含义的前提下，不要随便复制该配置 -->
+				        <!-- params=pageNum=pageHelperStart;pageSize=pageHelperRows; -->
+				        <!-- 支持通过Mapper接口参数来传递分页参数 -->
+				        supportMethodsArguments=false
+				        <!-- always总是返回PageInfo类型,check检查返回类型是否为PageInfo,none返回Page 
+				        	用来支持直接返回PageInfo类型，默认值none，
+				        	可选参数
+				        	always总是返回PageInfo类型,
+				        	check检查返回类型是否为PageInfo,
+				        	none返回Page(List)类型。
+				        	用法和配置参考com.github.pagehelper.test.basic包下的PageInfoTest，
+				        	特别要注意接口的返回值和xml中的resultType类型。
+			        	-->
+				        returnPageInfo=always
+			          </value>
+			        </property>
+		      	</bean>
+			</array>
+		</property>
+	</bean>
+	<bean class="org.mybatis.spring.mapper.MapperScannerConfigurer">
+		<property name="basePackage" value="com.cbcs.mapper" />
+		<property name="sqlSessionFactoryBeanName" value="sqlSessionFactory" />
+	</bean>
+
+</beans>
